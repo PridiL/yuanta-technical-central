@@ -1,6 +1,10 @@
 /* Yuanta Technical Central - app shell, report list, collaborative editor */
 (function () {
-  const TEMPLATES = { cpm: { name: "Chart Perspective Morning", base: "templates/cpm/" } };
+  const TEMPLATES = {
+    cpm: { name: "Chart Perspective Morning", base: "templates/cpm/" },
+    cpa: { name: "Chart Perspective Afternoon", base: "templates/cpa/" },
+  };
+  const DISC_GROUP = "shared";   // one quarterly disclaimer for every report format
   const COLORS = ["#e4572e", "#17bebb", "#7b2cbf", "#2a9d8f", "#f4a261", "#d62828", "#3a86ff", "#8338ec", "#06a77d", "#ff006e"];
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -47,7 +51,7 @@
       pages: M.disclaimerDefault.pages.map(p => base + p), created_at: "" };
   }
   async function allDisclaimers(tid) {
-    const list = (await store.listDisclaimers(tid)).map(d => ({ ...d, pdf: d.pdf || d.pdf_url }));
+    const list = (await store.listDisclaimers(DISC_GROUP)).map(d => ({ ...d, pdf: d.pdf || d.pdf_url }));
     return [...list, await defaultDisclaimer(tid)];
   }
 
@@ -170,14 +174,14 @@
         try {
           busy("กำลังเตรียมไฟล์ Disclaimer…");
           const pdfBlob = await YTCExport.extractPages(bytes, idx);
-          const folder = "disclaimer-" + tid;
+          const folder = "disclaimer-" + DISC_GROUP;
           const pdfUrl = await store.uploadBlob(folder, pdfBlob, "pdf");
           const pages = [];
           for (const i of idx) {
             busy(`กำลังแปลงหน้า ${i + 1}…`);
             pages.push(await store.uploadBlob(folder, await YTCExport.renderPdfPage(pdf, i, 1654), "jpg"));
           }
-          await store.addDisclaimer({ template: tid, label, pdf_url: pdfUrl, pages, created_by: me.name });
+          await store.addDisclaimer({ template: DISC_GROUP, label, pdf_url: pdfUrl, pages, created_by: me.name });
           busy(false); toast("อัปโหลด Disclaimer แล้ว — รีพอร์ตใหม่จะใช้เวอร์ชันนี้");
           done && done();
         } catch (e) { busy(false); toast("อัปโหลดไม่สำเร็จ: " + e.message, "err"); }
@@ -190,9 +194,16 @@
     const d = $("#dlg-new");
     $("#new-date").value = todayIso();
     const reports = await store.listReports().catch(() => []);
-    const last = reports.find(r => r.template === "cpm");
-    $("#new-src-copy-label").textContent = last ? `คัดลอกข้อความจากรีพอร์ตล่าสุด (${YTCRender.thaiDate(last.report_date)})` : "คัดลอกจากรีพอร์ตล่าสุด (ยังไม่มี)";
-    $("#new-src-copy").disabled = !last; $("#new-src-copy").checked = !!last; $("#new-src-blank").checked = !last;
+    const sel = $("#new-tpl");
+    sel.innerHTML = Object.entries(TEMPLATES).map(([k, t]) => `<option value="${k}">${esc(t.name)}</option>`).join("");
+    const pref = lsGet("ytc_last_tpl", "cpm"); if (TEMPLATES[pref]) sel.value = pref;
+    let last = null;
+    const refresh = () => {
+      last = reports.find(r => r.template === sel.value) || null;
+      $("#new-src-copy-label").textContent = last ? `คัดลอกข้อความจากรีพอร์ตล่าสุด (${YTCRender.thaiDate(last.report_date)})` : "คัดลอกจากรีพอร์ตล่าสุด (ยังไม่มีรีพอร์ตรูปแบบนี้)";
+      $("#new-src-copy").disabled = !last; $("#new-src-copy").checked = !!last; $("#new-src-blank").checked = !last;
+    };
+    sel.onchange = refresh; refresh();
     $("#new-copy-img").checked = false;
     d.showModal();
     $("#new-cancel").onclick = () => d.close();
@@ -201,11 +212,12 @@
       const date = $("#new-date").value; if (!date) return;
       const copy = $("#new-src-copy").checked && last;
       const copyImg = $("#new-copy-img").checked;
+      const tid = sel.value; lsSet("ytc_last_tpl", tid);
       d.close(); busy("กำลังสร้างรีพอร์ต…");
       try {
-        const M = await manifest("cpm");
-        const discs = await allDisclaimers("cpm");
-        const rep = await store.createReport({ template: "cpm", report_date: date, title: M.name, created_by: me.name });
+        const M = await manifest(tid);
+        const discs = await allDisclaimers(tid);
+        const rep = await store.createReport({ template: tid, report_date: date, title: M.name, created_by: me.name });
         const entries = [{ key: "_disclaimer", v: discs[0].id, by: me.name }];
         if (copy) {
           const src = await store.getFields(last.id);
