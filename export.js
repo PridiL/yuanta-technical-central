@@ -345,25 +345,28 @@
         const s = M.slides.find(x => x.n === onlyN);
         onStep && onStep(`กำลังสร้างรูปหน้า ${onlyN}…`);
         const { blob } = await pagePng(ctx, s, stage);
-        download(blob, `${ctx.fileBase} - ${String(onlyN).padStart(2, "0")} ${safeName(s.title)}.png`);
+        const pos = M.slides.filter(x => !M.disclaimerSlides.includes(x.n) && !isHidden(ctx, x.n)).findIndex(x => x.n === onlyN) + 1;
+        download(blob, `${ctx.fileBase} - ${String(pos || onlyN).padStart(2, "0")} ${safeName(s.title)}.png`);
         return;
       }
-      const zip = new JSZip();
+      // every page as its own PNG, saved one after another in report order;
+      // the leading number (01, 02, ...) keeps them in that order in the Downloads folder too
       const pages = M.slides.filter(s => !M.disclaimerSlides.includes(s.n) && !isHidden(ctx, s.n));
+      const disc = ctx.disclaimer;
+      const total = pages.length + disc.pages.length;
+      const pad = n => String(n).padStart(2, "0");
+      const pause = () => new Promise(r => setTimeout(r, 450));   // lets the browser start each download in turn
       let css = null, i = 0;
       for (const s of pages) {
-        onStep && onStep(`กำลังสร้างรูปหน้า ${s.n}…`);
+        onStep && onStep(`กำลังบันทึกรูปหน้า ${i + 1}/${total}…`);
         const r = await pagePng(ctx, s, stage, css); css = r.css;
-        zip.file(`${String(++i).padStart(2, "0")} ${safeName(s.title)}.png`, r.blob);
+        download(r.blob, `${ctx.fileBase} - ${pad(++i)} ${safeName(s.title)}.png`); await pause();
       }
-      const disc = ctx.disclaimer;
       for (let k = 0; k < disc.pages.length; k++) {
-        onStep && onStep(`กำลังใส่ Disclaimer หน้า ${k + 1}…`);
-        zip.file(`${String(++i).padStart(2, "0")} Disclaimer ${k + 1}.png`,
-          await imageToPng(await ctx.fetchBytes(disc.pages[k]), Math.round(M.widthPt * PNG_RATIO)));
+        onStep && onStep(`กำลังบันทึกรูปหน้า ${i + 1}/${total}…`);
+        const blob = await imageToPng(await ctx.fetchBytes(disc.pages[k]), Math.round(M.widthPt * PNG_RATIO));
+        download(blob, `${ctx.fileBase} - ${pad(++i)} Disclaimer ${k + 1}.png`); await pause();
       }
-      onStep && onStep("กำลังรวมไฟล์ ZIP…");
-      download(await zip.generateAsync({ type: "blob" }), `${ctx.fileBase} PNG.zip`);
     } finally { stage.remove(); }
   }
 
