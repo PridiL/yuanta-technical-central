@@ -107,7 +107,7 @@
         <li><b>ข้อความ</b> — คลิกที่กล่องแล้วพิมพ์ได้เลย บันทึกอัตโนมัติ</li>
         <li><b>รูปกราฟ</b> — คลิกกรอบรูปแล้วกด Ctrl+V (หรือลากไฟล์มาวาง) รูปจะเต็มกรอบอัตโนมัติ ดับเบิลคลิกที่รูปเพื่อลากเลื่อน หมุนลูกกลิ้งซูม หรือลากจุดที่ขอบรูปเพื่อยืดซ้าย-ขวา / บน-ล่าง (ปุ่ม “↔ เต็มความกว้าง” ยืดให้เต็มกรอบทันที)</li>
         <li><b>ตาราง</b> — คัดลอกช่วงข้อมูลจาก Excel แล้ววางที่ช่องแรก ระบบจะเติมทั้งตารางให้</li>
-        <li><b>ดาวน์โหลด</b> — ปุ่ม PowerPoint / PDF มุมขวาบน ไฟล์ใช้ธีมเดิมของรีพอร์ตทุกอย่าง</li></ol></section>
+        <li><b>ดาวน์โหลด</b> — ปุ่ม PowerPoint / PDF / PNG มุมขวาบน (PNG = ทุกหน้ารวมเป็น ZIP) หรือปุ่ม PNG เหนือแต่ละหน้าเพื่อเอารูปหน้านั้นหน้าเดียว ไฟล์ใช้ธีมเดิมของรีพอร์ตทุกอย่าง</li></ol></section>
     </div>`;
     $("#new-report").onclick = newReportDialog;
     let reports = [];
@@ -277,6 +277,7 @@
       <label class="chk" title="ไฮไลต์ช่องที่ยังเป็นข้อความเดิมที่คัดลอกมาจากรีพอร์ตก่อนหน้า"><input type="checkbox" id="show-stale" checked> ช่องที่ยังไม่แก้</label>
       <button class="btn sm" id="share">คัดลอกลิงก์</button>
       <button class="btn sm" id="dl-pptx">⬇ PowerPoint</button>
+      <button class="btn sm" id="dl-png" title="ทุกหน้าเป็นไฟล์ PNG รวมใน ZIP">⬇ PNG</button>
       <button class="btn primary sm" id="dl-pdf">⬇ PDF</button>`;
     $("#rep-status").value = report.status || "draft";
     $("#back").onclick = () => go("home");
@@ -316,7 +317,9 @@
       h.innerHTML = `<span class="pn">หน้า ${s.n}</span><b>${esc(s.title)}</b>
         <label>ผู้รับผิดชอบ <input class="owner" list="owners" value="${esc(m.owner || "")}" placeholder="ใส่ชื่อ"></label>
         <label class="chk"><input type="checkbox" class="done" ${m.done ? "checked" : ""}> เสร็จแล้ว</label>
-        <label class="chk"><input type="checkbox" class="hide" ${m.hidden ? "checked" : ""}> ไม่ใส่หน้านี้ในไฟล์</label>`;
+        <label class="chk"><input type="checkbox" class="hide" ${m.hidden ? "checked" : ""}> ไม่ใส่หน้านี้ในไฟล์</label>
+        <button class="btn sm png1" title="ดาวน์โหลดหน้านี้เป็นรูป PNG">⬇ PNG</button>`;
+      h.querySelector(".png1").onclick = () => runExport((c, step) => YTCExport.exportPng(c, step, s.n), `PNG หน้า ${s.n}`);
       const upd = patch => { const v = { ...pageMeta(s.n), ...patch }; commit("_page_" + s.n, v, { immediate: true }); renderSide(); wrap(s.n).classList.toggle("is-hidden", !!v.hidden); };
       h.querySelector(".owner").onchange = e => upd({ owner: e.target.value.trim() });
       h.querySelector(".done").onchange = e => upd({ done: e.target.checked });
@@ -767,6 +770,7 @@
     };
     $("#dl-pptx").onclick = () => runExport(YTCExport.exportPptx, "PowerPoint");
     $("#dl-pdf").onclick = () => runExport(YTCExport.exportPdf, "PDF");
+    $("#dl-png").onclick = () => runExport(YTCExport.exportPng, "PNG");
 
     const onUnload = ev => { if (Object.keys(pending).length) { flush(); ev.preventDefault(); ev.returnValue = ""; } };
     window.addEventListener("beforeunload", onUnload);

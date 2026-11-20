@@ -315,5 +315,57 @@
     return new Blob([await out.save()], { type: "application/pdf" });
   }
 
-  window.YTCExport = { exportPptx, exportPdf, readPdf, renderPdfPage, extractPages, download };
+  /* ---- PNG: one page, or every page in a ZIP ---- */
+  const PNG_RATIO = 3;                                   // 595 pt wide -> 1786 x 2526 px (~216 dpi)
+  async function pagePng(ctx, slide, stage, fontCSS) {
+    const M = ctx.manifest;
+    const node = YTCRender.buildPage(slide, ctx, { edit: false });
+    stage.innerHTML = ""; stage.appendChild(node);
+    await waitImages(node);
+    const css = fontCSS || await htmlToImage.getFontEmbedCSS(node);
+    const blob = await htmlToImage.toBlob(node, { pixelRatio: PNG_RATIO, backgroundColor: "#ffffff", fontEmbedCSS: css,
+      width: M.widthPt, height: M.heightPt });
+    return { blob, css };
+  }
+  async function imageToPng(bytes, widthPx) {          // disclaimer page jpg -> png at the same size as the pages
+    const bmp = await createImageBitmap(new Blob([bytes]));
+    const cv = document.createElement("canvas");
+    cv.width = widthPx; cv.height = Math.round(bmp.height * widthPx / bmp.width);
+    const g = cv.getContext("2d"); g.imageSmoothingQuality = "high"; g.drawImage(bmp, 0, 0, cv.width, cv.height);
+    return new Promise(r => cv.toBlob(r, "image/png"));
+  }
+  const safeName = s => String(s).replace(/[\\/:*?"<>|]+/g, "-").trim();
+  const isHidden = (ctx, n) => { const m = ctx.fields["_page_" + n]; return !!(m && m.v && m.v.hidden); };
+
+  async function exportPng(ctx, onStep, onlyN) {
+    const M = ctx.manifest;
+    const stage = document.createElement("div"); stage.className = "export-stage"; document.body.appendChild(stage);
+    try {
+      if (onlyN) {                                       // single page
+        const s = M.slides.find(x => x.n === onlyN);
+        onStep && onStep(`กำลังสร้างรูปหน้า ${onlyN}…`);
+        const { blob } = await pagePng(ctx, s, stage);
+        download(blob, `${ctx.fileBase} - ${String(onlyN).padStart(2, "0")} ${safeName(s.title)}.png`);
+        return;
+      }
+      const zip = new JSZip();
+      const pages = M.slides.filter(s => !M.disclaimerSlides.includes(s.n) && !isHidden(ctx, s.n));
+      let css = null, i = 0;
+      for (const s of pages) {
+        onStep && onStep(`กำลังสร้างรูปหน้า ${s.n}…`);
+        const r = await pagePng(ctx, s, stage, css); css = r.css;
+        zip.file(`${String(++i).padStart(2, "0")} ${safeName(s.title)}.png`, r.blob);
+      }
+      const disc = ctx.disclaimer;
+      for (let k = 0; k < disc.pages.length; k++) {
+        onStep && onStep(`กำลังใส่ Disclaimer หน้า ${k + 1}…`);
+        zip.file(`${String(++i).padStart(2, "0")} Disclaimer ${k + 1}.png`,
+          await imageToPng(await ctx.fetchBytes(disc.pages[k]), Math.round(M.widthPt * PNG_RATIO)));
+      }
+      onStep && onStep("กำลังรวมไฟล์ ZIP…");
+      download(await zip.generateAsync({ type: "blob" }), `${ctx.fileBase} PNG.zip`);
+    } finally { stage.remove(); }
+  }
+
+  window.YTCExport = { exportPptx, exportPdf, exportPng, readPdf, renderPdfPage, extractPages, download };
 })();
