@@ -55,6 +55,11 @@
         await kv("put", "reports", list); await kv("del", "fields:" + id);
       },
       async getFields(id) { return (await kv("get", "fields:" + id)) || {}; },
+      async getFieldsSince(id, since) {
+        const f = (await kv("get", "fields:" + id)) || {}, out = {};
+        for (const [k, v] of Object.entries(f)) if (!since || v.at > since) out[k] = v;
+        return out;
+      },
       async setFields(id, entries, by) {
         const f = (await kv("get", "fields:" + id)) || {};
         for (const { key, v, by: b } of entries) f[key] = { v, by: b || by, at: nowIso() };
@@ -91,6 +96,7 @@
           if (m.t === "bye") { delete peers[m.id]; emit(); }
           if (m.t === "r") h.onReport && h.onReport(m.patch);
         };
+        setTimeout(() => h.onStatus && h.onStatus("live"), 0);
         const iv = setInterval(() => {
           hello(); const t = Date.now();
           for (const k in peers) if (t - peers[k].at > 12000) delete peers[k];
@@ -127,6 +133,12 @@
       async deleteReport(id) { chk(await sb.from("reports").delete().eq("id", id)); },
       async getFields(id) {
         const rows = chk(await sb.from("fields").select("key,value,updated_by,updated_at").eq("report_id", id));
+        const out = {}; for (const r of rows) out[r.key] = { v: r.value, by: r.updated_by, at: r.updated_at }; return out;
+      },
+      async getFieldsSince(id, since) {
+        let q = sb.from("fields").select("key,value,updated_by,updated_at").eq("report_id", id);
+        if (since) q = q.gt("updated_at", since);
+        const rows = chk(await q.order("updated_at", { ascending: true }).limit(1000));
         const out = {}; for (const r of rows) out[r.key] = { v: r.value, by: r.updated_by, at: r.updated_at }; return out;
       },
       async setFields(id, entries, by) {

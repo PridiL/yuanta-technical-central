@@ -271,6 +271,7 @@
       <input type="date" id="rep-date" value="${report.report_date}" title="วันที่ของรีพอร์ต (ทุกหน้า)">
       <select id="rep-status" title="สถานะ"><option value="draft">Draft</option><option value="final">Final</option></select>
       <span id="save-state" class="save ok">บันทึกแล้ว</span>
+      <span id="live-state" class="live wait" title="กำลังเชื่อมต่อ…">● เชื่อมต่อ…</span>
       <div id="peers" class="peers"></div>
       <div class="spacer"></div>
       <label class="chk" title="ไฮไลต์ช่องที่ยังเป็นข้อความเดิมที่คัดลอกมาจากรีพอร์ตก่อนหน้า"><input type="checkbox" id="show-stale" checked> ช่องที่ยังไม่แก้</label>
@@ -378,10 +379,11 @@
     async function flush() {
       clearTimeout(saveTimer); saveTimer = null;
       const keys = Object.keys(pending); if (!keys.length || saving) return;
-      const entries = keys.map(k => ({ key: k, v: pending[k] })); keys.forEach(k => delete pending[k]);
+      const entries = keys.map(k => ({ key: k, v: pending[k] })); keys.forEach(k => { delete pending[k]; inflight.add(k); });
       saving = true; setSaveState();
-      try { await store.setFields(report.id, entries, me.name); }
+      try { await store.setFields(report.id, entries, me.name); keys.forEach(k => { inflight.delete(k); savedAt[k] = Date.now(); }); }
       catch (e) {
+        keys.forEach(k => inflight.delete(k));
         for (const en of entries) if (!(en.key in pending)) pending[en.key] = en.v;
         $("#save-state").className = "save err"; $("#save-state").textContent = "บันทึกไม่สำเร็จ — กำลังลองใหม่";
         saving = false; saveTimer = setTimeout(flush, 4000); return;
@@ -685,15 +687,55 @@
       if (pe) pe.innerHTML = [{ ...me, self: true }, ...peers].map(p => `<span class="av" style="background:${p.color}" title="${esc(p.name)}${p.self ? " (คุณ)" : ""}">${esc((p.name || "?").slice(0, 2))}</span>`).join("");
     }
 
+    /* ---- sync: live push (WebSocket) + a fallback that re-reads the database over HTTPS.
+       Office networks often block or drop WebSockets; the fallback keeps everyone in sync anyway. ---- */
+    const inflight = new Set(), savedAt = {}, pushedAt = {};
+    let liveState = "wait", pollTimer = null, pollTick = 0, polling = false;
+    // newest server timestamp seen; each poll asks only for rows changed after (it - 10 s overlap)
+    let lastAt = Object.values(fields).reduce((m, f) => (f.at && f.at > m ? f.at : m), "");
+    function showLive() {
+      const el = $("#live-state"); if (!el) return;
+      const map = { live: ["live ok", "● Live", "เชื่อมต่อแบบเรียลไทม์ — เห็นงานของทีมทันที"],
+        poll: ["live poll", "● ซิงก์อัตโนมัติ", "เครือข่ายนี้ไม่รองรับการเชื่อมต่อแบบเรียลไทม์ — ระบบดึงงานของทีมทุก 3 วินาทีแทน"],
+        wait: ["live wait", "● เชื่อมต่อ…", "กำลังเชื่อมต่อ…"] }[liveState];
+      el.className = map[0]; el.textContent = map[1]; el.title = map[2];
+    }
+    async function syncPoll() {
+      if (polling || document.hidden) return;
+      pollTick++;
+      polling = true;
+      try {
+        const since = lastAt ? new Date(new Date(lastAt).getTime() - 10000).toISOString() : "";
+        const rows = await store.getFieldsSince(report.id, since);
+        const now = Date.now();
+        for (const [k, row] of Object.entries(rows)) {
+          if (row.at && row.at > lastAt) lastAt = row.at;
+          if (k in pending || inflight.has(k)) continue;           // my own unsaved / saving edit
+          if (now - (savedAt[k] || 0) < 4000 || now - (pushedAt[k] || 0) < 5000) continue;
+          const mine = fields[k] ? JSON.stringify(fields[k].v) : undefined;
+          if (mine !== JSON.stringify(row.v)) applyRemote(k, row.v, row.by, true);
+        }
+        if (pollTick % 5 === 0 || liveState !== "live") {
+          const r = await store.getReport(report.id);
+          if (r && r.report_date !== report.report_date) { report.report_date = r.report_date; $("#rep-date").value = r.report_date; refreshDates(); }
+          if (r && r.status !== report.status) { report.status = r.status; $("#rep-status").value = r.status; }
+        }
+      } catch (e) { /* offline for a moment - try again next tick */ }
+      polling = false;
+    }
+    pollTimer = setInterval(syncPoll, 3000);
+    const onVisible = () => { if (!document.hidden) { pollTick = 4; syncPoll(); } };
+    document.addEventListener("visibilitychange", onVisible);
+
     const live = store.join(report.id, me, {
-      onField: applyRemote,
+      onField: (k, v, by) => { pushedAt[k] = Date.now(); applyRemote(k, v, by); },
       onPresence: list => { peers = list.filter(p => p && p.id !== me.id); paintPeers(); renderSide(); },
       onReport: patch => {
         Object.assign(report, patch);
         if (patch.report_date) { $("#rep-date").value = patch.report_date; refreshDates(); }
         if (patch.status) $("#rep-status").value = patch.status;
       },
-      onStatus: s => { if (s === "offline") toast("การเชื่อมต่อเรียลไทม์หลุด — ข้อมูลยังบันทึกได้ รีเฟรชหน้าเพื่อเห็นงานของคนอื่น", "err"); },
+      onStatus: s => { liveState = s === "live" ? "live" : "poll"; showLive(); if (s === "live") { pollTick = 4; syncPoll(); } },
     });
 
     function refreshDates() {
@@ -734,13 +776,14 @@
     view = {
       name: "editor",
       leave: async () => {
-        await flush(); live.leave();
+        await flush(); live.leave(); clearInterval(pollTimer); document.removeEventListener("visibilitychange", onVisible);
         window.removeEventListener("resize", onResize); window.removeEventListener("beforeunload", onUnload); window.removeEventListener("pagehide", onHide);
         document.removeEventListener("paste", onPaste); document.removeEventListener("mousedown", onDocClick);
       },
     };
-    renderSide(); renderPages();
-    window.YTC_DEBUG = { ctx, fields, report, M };
+    renderSide(); renderPages(); showLive();
+    setTimeout(() => { if (liveState === "wait") { liveState = "poll"; showLive(); } }, 8000);   // never connected
+    window.YTC_DEBUG = { ctx, fields, report, M, sync: () => ({ liveState, pollTick }) };
   }
 
   /* ---------- boot ---------- */
