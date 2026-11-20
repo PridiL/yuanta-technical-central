@@ -26,6 +26,22 @@
 
   function cellKey(e, r, c) { return `${e.key}_r${r}c${c}`; }
 
+  /* image crop: {x, y, w, h} = visible part of the image, as fractions of its width/height */
+  function isCrop(val) { return val && (val.fit === "crop" || val.fit === "cover"); }
+  function coverCrop(iw, ih, fw, fh) {          // largest centred area with the frame's shape
+    const ia = iw / ih, fa = fw / fh;
+    return ia > fa ? { x: (1 - fa / ia) / 2, y: 0, w: fa / ia, h: 1 } : { x: 0, y: (1 - ia / fa) / 2, w: 1, h: ia / fa };
+  }
+  function cropOf(val, fw, fh) {
+    if (val.crop && val.crop.w > 0 && val.crop.h > 0) return val.crop;
+    return coverCrop(val.w || fw, val.h || fh, fw, fh);
+  }
+  function placeCrop(img, c) {
+    Object.assign(img.style, { position: "absolute", maxWidth: "none", objectFit: "fill",
+      width: (100 / c.w) + "%", height: (100 / c.h) + "%",
+      left: (-c.x / c.w * 100) + "%", top: (-c.y / c.h * 100) + "%" });
+  }
+
   /* value helpers ---------------------------------------------------- */
   function textValue(ctx, e) {
     if (e.link === "date") return thaiDate(ctx.report.report_date);
@@ -85,10 +101,16 @@
         if (val && val.url) {
           const img = document.createElement("img");
           img.className = "chart"; img.alt = ""; img.draggable = false;
-          img.style.objectFit = val.fit === "cover" ? "cover" : val.fit === "stretch" ? "fill" : "contain";
           img.crossOrigin = "anonymous";
           ctx.resolveUrl(val.url).then(u => { img.src = u; });
-          box.appendChild(img);
+          if (isCrop(val)) {                       // fill the frame, showing the chosen part of the image
+            const clip = document.createElement("div"); clip.className = "clip";
+            placeCrop(img, cropOf(val, w, h));
+            clip.appendChild(img); box.appendChild(clip);
+          } else {
+            img.style.objectFit = val.fit === "stretch" ? "fill" : "contain";
+            box.appendChild(img);
+          }
           if (opts.edit && f.by === "_copy") box.classList.add("stale");
         } else if (opts.edit) {
           box.classList.add("empty");
@@ -99,7 +121,8 @@
           const bar = document.createElement("div");
           bar.className = "imgbar";
           bar.innerHTML = `<button data-act="upload" title="เลือกไฟล์">อัปโหลด</button>` +
-            (val && val.url ? `<button data-act="fit" title="สลับวิธีวางรูป: พอดีกรอบ (เห็นทั้งรูป) → เต็มกรอบ (ตัดขอบ) → ยืดเต็มกรอบ">${{ cover: "เต็มกรอบ", stretch: "ยืดเต็มกรอบ" }[val.fit] || "พอดีกรอบ"}</button><button data-act="clear" title="ลบรูป">ลบ</button>` : "");
+            (val && val.url ? (isCrop(val) ? `<button data-act="adjust" title="ลากเพื่อเลื่อนรูป หมุนลูกกลิ้งเพื่อซูม (หรือดับเบิลคลิกที่รูป)">✥ ปรับรูป</button>` : "") +
+              `<button data-act="fit" title="สลับวิธีวางรูป: เต็มกรอบ (ปรับตำแหน่งได้) → พอดีกรอบ (เห็นทั้งรูป) → ยืดเต็มกรอบ">${isCrop(val) ? "เต็มกรอบ" : val.fit === "stretch" ? "ยืดเต็มกรอบ" : "พอดีกรอบ"}</button><button data-act="clear" title="ลบรูป">ลบ</button>` : "");
           box.appendChild(bar);
         }
       } else if (e.type === "table") {
@@ -151,5 +174,6 @@
     return page;
   }
 
-  window.YTCRender = { buildPage, buildDisclaimerPage, thaiDate, ddmmyyyy, cellKey, textValue, cellValue };
+  window.YTCRender = { buildPage, buildDisclaimerPage, thaiDate, ddmmyyyy, cellKey, textValue, cellValue,
+    isCrop, coverCrop, cropOf, placeCrop };
 })();

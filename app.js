@@ -105,7 +105,7 @@
         <li><b>สร้างรีพอร์ต</b> — เลือกวันที่ แล้วคัดลอกข้อความจากรีพอร์ตล่าสุด (ช่องที่ยังไม่ได้แก้จะมีจุดสีส้ม)</li>
         <li><b>แบ่งงาน</b> — ใส่ชื่อ “ผู้รับผิดชอบ” เหนือแต่ละหน้า ทุกคนเปิดลิงก์เดียวกันแล้วเขียนพร้อมกันได้ เห็นกรอบสีพร้อมชื่อของคนที่กำลังแก้</li>
         <li><b>ข้อความ</b> — คลิกที่กล่องแล้วพิมพ์ได้เลย บันทึกอัตโนมัติ</li>
-        <li><b>รูปกราฟ</b> — คลิกกรอบรูปแล้วกด Ctrl+V (หรือลากไฟล์มาวาง) ปุ่ม “พอดีกรอบ / เต็มกรอบ / ยืดเต็มกรอบ” ใช้เลือกวิธีวางรูป</li>
+        <li><b>รูปกราฟ</b> — คลิกกรอบรูปแล้วกด Ctrl+V (หรือลากไฟล์มาวาง) รูปจะเต็มกรอบอัตโนมัติ ดับเบิลคลิกที่รูปเพื่อลากเลื่อน / หมุนลูกกลิ้งซูม เลือกส่วนของกราฟที่ต้องการ</li>
         <li><b>ตาราง</b> — คัดลอกช่วงข้อมูลจาก Excel แล้ววางที่ช่องแรก ระบบจะเติมทั้งตารางให้</li>
         <li><b>ดาวน์โหลด</b> — ปุ่ม PowerPoint / PDF มุมขวาบน ไฟล์ใช้ธีมเดิมของรีพอร์ตทุกอย่าง</li></ol></section>
     </div>`;
@@ -453,9 +453,21 @@
         selectImg(box);
         if (act === "upload") pickFile(key);
         if (act === "clear") { if (confirm("ลบรูปนี้?")) setImage(key, null); }
-        if (act === "fit") { const cur = fields[key].v.fit || "contain"; const v = { ...fields[key].v, fit: { contain: "cover", cover: "stretch", stretch: "contain" }[cur] }; setImage(key, v); }
+        if (act === "fit") {
+          const v0 = fields[key].v, cur = YTCRender.isCrop(v0) ? "crop" : (v0.fit || "contain");
+          const nxt = { crop: "contain", contain: "stretch", stretch: "crop" }[cur];
+          setImage(key, { ...v0, fit: nxt });
+        }
+        if (act === "adjust") startAdjust(box);
       };
-      box.ondblclick = () => pickFile(key);
+      box.ondblclick = ev => {
+        if (ev.target.closest(".imgbar") || ev.target.closest(".adjbar")) return;
+        const v = fields[key] && fields[key].v;
+        if (v && v.url) {
+          if (!YTCRender.isCrop(v)) { setImage(key, { ...v, fit: "crop" }); startAdjust(document.querySelector(`.page .el[data-key="${key}"]`)); }
+          else startAdjust(box);
+        } else pickFile(key);
+      };
       box.addEventListener("dragover", ev => { ev.preventDefault(); box.classList.add("drop"); });
       box.addEventListener("dragleave", () => box.classList.remove("drop"));
       box.addEventListener("drop", ev => {
@@ -495,28 +507,124 @@
       box && box.classList.add("uploading");
       try {
         const bmp = await createImageBitmap(file);
-        const maxW = Math.round(e.box[2] * 4.2);               // ~300 dpi at the frame size
-        const s = Math.min(1, maxW / bmp.width);
+        const t = trimBox(bmp);                                  // drop blank screenshot margins
+        const maxW = Math.max(2000, Math.round(e.box[2] * 4.2)); // ~300 dpi, with room to zoom in
+        const s = Math.min(1, maxW / t.w);
         const cv = document.createElement("canvas");
-        cv.width = Math.round(bmp.width * s); cv.height = Math.round(bmp.height * s);
+        cv.width = Math.round(t.w * s); cv.height = Math.round(t.h * s);
         const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
-        g.imageSmoothingQuality = "high"; g.drawImage(bmp, 0, 0, cv.width, cv.height);
+        g.imageSmoothingQuality = "high"; g.drawImage(bmp, t.x, t.y, t.w, t.h, 0, 0, cv.width, cv.height);
         let blob = await new Promise(r => cv.toBlob(r, "image/png")), ext = "png";
-        if (blob.size > 900000) { blob = await new Promise(r => cv.toBlob(r, "image/jpeg", 0.92)); ext = "jpg"; }
+        if (blob.size > 1500000) { blob = await new Promise(r => cv.toBlob(r, "image/jpeg", 0.92)); ext = "jpg"; }
         const url = await store.uploadBlob(report.id, blob, ext);
-        const prev = fields[key] && fields[key].v;
-        setImage(key, { url, w: cv.width, h: cv.height, fit: (prev && prev.fit) || "contain" });
-        toast("อัปโหลดรูปแล้ว");
+        setImage(key, { url, w: cv.width, h: cv.height, fit: "crop" });   // new picture always fills the frame
+        toast("วางรูปแล้ว — ดับเบิลคลิกที่รูปเพื่อเลื่อน/ซูม");
       } catch (err) { toast("อัปโหลดรูปไม่สำเร็จ: " + err.message, "err"); }
       finally { box && box.classList.remove("uploading"); }
     }
+    /* blank-margin trim: rows/cols at the edges that are one flat colour (screenshot borders) */
+    function trimBox(bmp) {
+      const W = bmp.width, H = bmp.height;
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+      const g = cv.getContext("2d", { willReadFrequently: true }); g.drawImage(bmp, 0, 0);
+      const d = g.getImageData(0, 0, W, H).data;
+      const px = (x, y) => (y * W + x) * 4;
+      const ref = px(0, 0);
+      const near = i => Math.abs(d[i] - d[ref]) < 14 && Math.abs(d[i + 1] - d[ref + 1]) < 14 && Math.abs(d[i + 2] - d[ref + 2]) < 14;
+      const rowFlat = y => { for (let x = 0; x < W; x += 2) if (!near(px(x, y))) return false; return true; };
+      const colFlat = (x, y0, y1) => { for (let y = y0; y < y1; y += 2) if (!near(px(x, y))) return false; return true; };
+      let top = 0, bot = H - 1, left = 0, right = W - 1;
+      while (top < bot && rowFlat(top)) top++;
+      while (bot > top && rowFlat(bot)) bot--;
+      while (left < right && colFlat(left, top, bot + 1)) left++;
+      while (right > left && colFlat(right, top, bot + 1)) right--;
+      const pad = 2;
+      const t = { x: Math.max(0, left - pad), y: Math.max(0, top - pad) };
+      t.w = Math.min(W, right + pad + 1) - t.x; t.h = Math.min(H, bot + pad + 1) - t.y;
+      if (t.w < W * 0.4 || t.h < H * 0.4) return { x: 0, y: 0, w: W, h: H };   // mostly flat: keep everything
+      return t;
+    }
+
+    /* crop tool: drag = move, wheel / slider = zoom; the frame shape never changes */
+    let adjusting = null;
+    function startAdjust(box) {
+      if (!box) return;
+      if (adjusting) finishAdjust(true);
+      const key = box.dataset.key, e = elementOf(key), v = fields[key] && fields[key].v;
+      if (!v || !v.url) return;
+      const fw = e.box[2], fh = e.box[3];
+      const base = YTCRender.coverCrop(v.w || fw, v.h || fh, fw, fh);       // zoom 100% = just fills the frame
+      let c = { ...YTCRender.cropOf(v, fw, fh) };
+      const img = box.querySelector(".clip img"); if (!img) return;
+      const ghost = img.cloneNode(); ghost.className = "ghost"; box.insertBefore(ghost, box.firstChild);
+      box.classList.add("adjusting"); selectImg(box);
+      const bar = document.createElement("div"); bar.className = "adjbar";
+      bar.innerHTML = `<span>ลากเพื่อเลื่อน · ลูกกลิ้งเพื่อซูม</span><input type="range" min="100" max="600" step="1" title="ซูม"><button data-a="reset">รีเซ็ต</button><button data-a="ok" class="ok">เสร็จ</button>`;
+      box.appendChild(bar);
+      const range = bar.querySelector("input");
+      const clamp = () => {
+        c.w = Math.min(base.w, Math.max(base.w / 6, c.w)); c.h = c.w / base.w * base.h;
+        c.x = Math.min(1 - c.w, Math.max(0, c.x)); c.y = Math.min(1 - c.h, Math.max(0, c.y));
+      };
+      const paint = () => { clamp(); YTCRender.placeCrop(img, c); YTCRender.placeCrop(ghost, c); range.value = Math.round(base.w / c.w * 100); };
+      const zoomAt = (factor, fx = 0.5, fy = 0.5) => {         // keep the point under (fx, fy) of the frame fixed
+        const px = c.x + fx * c.w, py = c.y + fy * c.h;
+        c.w = c.w / factor; c.h = c.w / base.w * base.h; clamp();
+        c.x = px - fx * c.w; c.y = py - fy * c.h; paint();
+      };
+      let drag = null;
+      const down = ev => {
+        if (ev.target.closest(".adjbar")) return;
+        ev.preventDefault(); box.setPointerCapture(ev.pointerId);
+        drag = { x: ev.clientX, y: ev.clientY, c: { ...c } };
+      };
+      const move = ev => {
+        if (!drag) return;
+        const r = box.getBoundingClientRect();
+        c.x = drag.c.x - (ev.clientX - drag.x) / r.width * c.w;
+        c.y = drag.c.y - (ev.clientY - drag.y) / r.height * c.h; paint();
+      };
+      const up = () => { drag = null; };
+      const wheel = ev => {
+        ev.preventDefault();
+        const r = box.getBoundingClientRect();
+        zoomAt(Math.exp(-ev.deltaY * 0.0015), (ev.clientX - r.left) / r.width, (ev.clientY - r.top) / r.height);
+      };
+      const keys = ev => { if (ev.key === "Enter") { ev.preventDefault(); finishAdjust(true); } if (ev.key === "Escape") finishAdjust(false); };
+      range.oninput = () => zoomAt((range.value / 100) / (base.w / c.w));
+      bar.addEventListener("pointerdown", ev => ev.stopPropagation());
+      bar.onclick = ev => {
+        ev.stopPropagation();
+        const a = ev.target.dataset.a;
+        if (a === "reset") { c = { ...base }; paint(); }
+        if (a === "ok") finishAdjust(true);
+      };
+      box.addEventListener("pointerdown", down); box.addEventListener("pointermove", move);
+      box.addEventListener("pointerup", up); box.addEventListener("wheel", wheel, { passive: false });
+      document.addEventListener("keydown", keys);
+      const outside = ev => { if (!box.contains(ev.target)) finishAdjust(true); };
+      setTimeout(() => document.addEventListener("mousedown", outside), 0);
+      paint();
+      adjusting = {
+        key, box, crop: () => c,
+        done: save => {
+          box.removeEventListener("pointerdown", down); box.removeEventListener("pointermove", move);
+          box.removeEventListener("pointerup", up); box.removeEventListener("wheel", wheel);
+          document.removeEventListener("keydown", keys); document.removeEventListener("mousedown", outside);
+          if (save) setImage(key, { ...fields[key].v, fit: "crop", crop: { x: +c.x.toFixed(5), y: +c.y.toFixed(5), w: +c.w.toFixed(5), h: +c.h.toFixed(5) } });
+          else rerenderEl(key);
+        },
+      };
+    }
+    function finishAdjust(save) { const a = adjusting; adjusting = null; if (a) a.done(save); }
+
     function setImage(key, v) { commit(key, v, { immediate: true }); rerenderEl(key); }
     function rerenderEl(key) {
       const e = elementOf(key); if (!e) return;
       const slide = M.slides.find(s => s.elements.includes(e));
       const tmp = YTCRender.buildPage({ ...slide, elements: [e] }, ctx, { edit: true });
       const fresh = tmp.querySelector(".el"); const old = document.querySelector(`.page .el[data-key="${key}"]`);
-      if (old && fresh) { const wasSel = old.classList.contains("sel"); old.replaceWith(fresh); wirePage(fresh.parentNode, slide); if (wasSel) fresh.classList.add("sel"); }
+      if (old && fresh) { const wasSel = old.classList.contains("sel"); old.replaceWith(fresh); wireImage(fresh); if (wasSel) fresh.classList.add("sel"); }
       paintPeers();
     }
 
@@ -534,7 +642,7 @@
         if (focusKey === key && typed) { tx.closest(".el,.cell").classList.add("conflict"); tx.closest(".el,.cell").dataset.by = by; return; }
         if (tx.innerText.replace(/\n$/, "") !== (v ?? "")) tx.textContent = v ?? "";
         tx.closest(".el,.cell").classList.remove("stale");
-      } else if (document.querySelector(`.el-image[data-key="${CSS.escape(key)}"]`)) rerenderEl(key);
+      } else if (document.querySelector(`.el-image[data-key="${CSS.escape(key)}"]`)) { if (!(adjusting && adjusting.key === key)) rerenderEl(key); }
     }
     function paintPeers() {
       document.querySelectorAll(".peer-tag").forEach(t => t.remove());
@@ -584,6 +692,7 @@
     };
     const runExport = async (fn, label) => {
       if (document.activeElement && document.activeElement.isContentEditable) document.activeElement.blur();
+      finishAdjust(true);
       await flush();
       ctx.disclaimer = discOf(); ctx.fileBase = fileBase();
       try { await fn(ctx, m => busy(m)); busy(false); toast(label + " ดาวน์โหลดแล้ว"); }

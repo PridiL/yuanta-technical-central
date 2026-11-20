@@ -195,10 +195,11 @@
           for (const ch of [...blipFill.childNodes]) if (ch !== blip) ch.remove();
           const [x, y, w, h] = e.box;
           const iw = val.w || w, ih = val.h || h;
-          if (val.fit === "cover") {
-            const fa = w / h, ia = iw / ih, sr = doc.createElementNS(A, "a:srcRect");
-            if (ia > fa) { const c = Math.round((1 - fa / ia) / 2 * 100000); sr.setAttribute("l", c); sr.setAttribute("r", c); }
-            else { const c = Math.round((1 - ia / fa) / 2 * 100000); sr.setAttribute("t", c); sr.setAttribute("b", c); }
+          if (YTCRender.isCrop(val)) {                // same visible area as the editor (PowerPoint crop)
+            const c = YTCRender.cropOf(val, w, h), sr = doc.createElementNS(A, "a:srcRect");
+            const pct = v => String(Math.round(v * 100000));
+            sr.setAttribute("l", pct(c.x)); sr.setAttribute("t", pct(c.y));
+            sr.setAttribute("r", pct(1 - c.x - c.w)); sr.setAttribute("b", pct(1 - c.y - c.h));
             blipFill.appendChild(sr);
           } else if (val.fit === "stretch") {
             /* keep the template frame as is */

@@ -124,6 +124,16 @@ body[data-view=editor] #topbar-report { flex-wrap: nowrap; overflow-x: auto; scr
 .tx { white-space: pre-wrap; overflow-wrap: break-word; outline: none; font-weight: normal; font-synthesis: none; -webkit-font-smoothing: antialiased; }
 .el-image { overflow: hidden; }
 .el-image img.chart { width: 100%; height: 100%; display: block; }
+.el-image .clip { position: absolute; inset: 0; overflow: hidden; }
+.el-image.adjusting { overflow: visible; z-index: 30; cursor: grab; outline: 2px solid var(--accent) !important; touch-action: none; }
+.el-image.adjusting:active { cursor: grabbing; }
+.el-image.adjusting .imgbar { display: none !important; }
+.el-image .ghost { position: absolute; opacity: .32; pointer-events: none; box-shadow: 0 0 0 1px rgba(14,165,233,.6); }
+.adjbar { position: absolute; left: 0; top: 100%; margin-top: 3px; display: flex; align-items: center; gap: 4px; background: rgba(29,42,110,.95);
+  color: #fff; border-radius: 4px; padding: 2px 5px; font: 7.5px 'Kanit Light'; white-space: nowrap; z-index: 31; cursor: default; }
+.adjbar input { width: 70px; height: 10px; margin: 0; accent-color: var(--accent); }
+.adjbar button { font: 7.5px 'Kanit Light'; border: 0; border-radius: 3px; padding: 1px 6px; cursor: pointer; background: rgba(255,255,255,.18); color: #fff; }
+.adjbar button.ok { background: var(--accent); }
 .el-table .cell { position: absolute; display: flex; flex-direction: column; box-sizing: border-box; }
 .el-table .cell .tx { width: 100%; }
 
