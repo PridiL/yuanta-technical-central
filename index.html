@@ -132,6 +132,10 @@ body[data-view=editor] #topbar-report { flex-wrap: nowrap; overflow-x: auto; scr
 .adjbar { position: absolute; left: 0; top: 100%; margin-top: 3px; display: flex; align-items: center; gap: 4px; background: rgba(29,42,110,.95);
   color: #fff; border-radius: 4px; padding: 2px 5px; font: 7.5px 'Kanit Light'; white-space: nowrap; z-index: 31; cursor: default; }
 .adjbar input { width: 70px; height: 10px; margin: 0; accent-color: var(--accent); }
+.hdl { position: absolute; z-index: 32; background: #fff; border: 1.2px solid var(--accent); border-radius: 2px; box-shadow: 0 0 2px rgba(0,0,0,.4); transform: translate(-50%, -50%); }
+.hdl-l, .hdl-r { width: 5px; height: 16px; cursor: ew-resize; }
+.hdl-t, .hdl-b { width: 16px; height: 5px; cursor: ns-resize; }
+.hdl:hover { background: var(--accent); }
 .adjbar button { font: 7.5px 'Kanit Light'; border: 0; border-radius: 3px; padding: 1px 6px; cursor: pointer; background: rgba(255,255,255,.18); color: #fff; }
 .adjbar button.ok { background: var(--accent); }
 .el-table .cell { position: absolute; display: flex; flex-direction: column; box-sizing: border-box; }

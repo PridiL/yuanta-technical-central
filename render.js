@@ -26,20 +26,35 @@
 
   function cellKey(e, r, c) { return `${e.key}_r${r}c${c}`; }
 
-  /* image crop: {x, y, w, h} = visible part of the image, as fractions of its width/height */
-  function isCrop(val) { return val && (val.fit === "crop" || val.fit === "cover"); }
-  function coverCrop(iw, ih, fw, fh) {          // largest centred area with the frame's shape
+  /* image placement: rect {l, t, w, h} = where the whole image sits, in fractions of the frame
+     (l=0,t=0,w=1,h=1 = stretched exactly onto the frame; w>1 = wider than the frame, cropped) */
+  function coverRect(iw, ih, fw, fh) {          // fills the frame, keeps proportions, centred
     const ia = iw / ih, fa = fw / fh;
-    return ia > fa ? { x: (1 - fa / ia) / 2, y: 0, w: fa / ia, h: 1 } : { x: 0, y: (1 - ia / fa) / 2, w: 1, h: ia / fa };
+    if (ia > fa) { const w = ia / fa; return { l: (1 - w) / 2, t: 0, w, h: 1 }; }
+    const h = fa / ia; return { l: 0, t: (1 - h) / 2, w: 1, h };
   }
-  function cropOf(val, fw, fh) {
-    if (val.crop && val.crop.w > 0 && val.crop.h > 0) return val.crop;
-    return coverCrop(val.w || fw, val.h || fh, fw, fh);
+  function containRect(iw, ih, fw, fh) {        // whole image visible, keeps proportions, centred
+    const ia = iw / ih, fa = fw / fh;
+    if (ia > fa) { const h = fa / ia; return { l: 0, t: (1 - h) / 2, w: 1, h }; }
+    const w = ia / fa; return { l: (1 - w) / 2, t: 0, w, h: 1 };
   }
-  function placeCrop(img, c) {
+  function rectOf(val, fw, fh) {
+    const iw = val.w || fw, ih = val.h || fh;
+    if (val.rect && val.rect.w > 0 && val.rect.h > 0) return val.rect;
+    if (val.crop && val.crop.w > 0 && val.crop.h > 0) {           // older saved crop -> rect
+      const c = val.crop; return { l: -c.x / c.w, t: -c.y / c.h, w: 1 / c.w, h: 1 / c.h };
+    }
+    if (val.fit === "stretch") return { l: 0, t: 0, w: 1, h: 1 };
+    if (val.fit === "contain") return containRect(iw, ih, fw, fh);
+    return coverRect(iw, ih, fw, fh);
+  }
+  function fitLabel(val) {
+    if (val.rect || val.crop) return "ปรับเอง";
+    return { stretch: "ยืดเต็มกรอบ", contain: "พอดีกรอบ" }[val.fit] || "เต็มกรอบ";
+  }
+  function placeRect(img, r) {
     Object.assign(img.style, { position: "absolute", maxWidth: "none", objectFit: "fill",
-      width: (100 / c.w) + "%", height: (100 / c.h) + "%",
-      left: (-c.x / c.w * 100) + "%", top: (-c.y / c.h * 100) + "%" });
+      left: (r.l * 100) + "%", top: (r.t * 100) + "%", width: (r.w * 100) + "%", height: (r.h * 100) + "%" });
   }
 
   /* value helpers ---------------------------------------------------- */
@@ -103,14 +118,9 @@
           img.className = "chart"; img.alt = ""; img.draggable = false;
           img.crossOrigin = "anonymous";
           ctx.resolveUrl(val.url).then(u => { img.src = u; });
-          if (isCrop(val)) {                       // fill the frame, showing the chosen part of the image
-            const clip = document.createElement("div"); clip.className = "clip";
-            placeCrop(img, cropOf(val, w, h));
-            clip.appendChild(img); box.appendChild(clip);
-          } else {
-            img.style.objectFit = val.fit === "stretch" ? "fill" : "contain";
-            box.appendChild(img);
-          }
+          const clip = document.createElement("div"); clip.className = "clip";
+          placeRect(img, rectOf(val, w, h));
+          clip.appendChild(img); box.appendChild(clip);
           if (opts.edit && f.by === "_copy") box.classList.add("stale");
         } else if (opts.edit) {
           box.classList.add("empty");
@@ -121,8 +131,8 @@
           const bar = document.createElement("div");
           bar.className = "imgbar";
           bar.innerHTML = `<button data-act="upload" title="เลือกไฟล์">อัปโหลด</button>` +
-            (val && val.url ? (isCrop(val) ? `<button data-act="adjust" title="ลากเพื่อเลื่อนรูป หมุนลูกกลิ้งเพื่อซูม (หรือดับเบิลคลิกที่รูป)">✥ ปรับรูป</button>` : "") +
-              `<button data-act="fit" title="สลับวิธีวางรูป: เต็มกรอบ (ปรับตำแหน่งได้) → พอดีกรอบ (เห็นทั้งรูป) → ยืดเต็มกรอบ">${isCrop(val) ? "เต็มกรอบ" : val.fit === "stretch" ? "ยืดเต็มกรอบ" : "พอดีกรอบ"}</button><button data-act="clear" title="ลบรูป">ลบ</button>` : "");
+            (val && val.url ? `<button data-act="adjust" title="เลื่อน ซูม และยืดรูปซ้าย-ขวา / บน-ล่าง (หรือดับเบิลคลิกที่รูป)">✥ ปรับรูป</button>` +
+              `<button data-act="fit" title="สลับ: เต็มกรอบ → พอดีกรอบ → ยืดเต็มกรอบ">${fitLabel(val)}</button><button data-act="clear" title="ลบรูป">ลบ</button>` : "");
           box.appendChild(bar);
         }
       } else if (e.type === "table") {
@@ -175,5 +185,5 @@
   }
 
   window.YTCRender = { buildPage, buildDisclaimerPage, thaiDate, ddmmyyyy, cellKey, textValue, cellValue,
-    isCrop, coverCrop, cropOf, placeCrop };
+    coverRect, containRect, rectOf, placeRect, fitLabel };
 })();

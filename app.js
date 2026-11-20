@@ -105,7 +105,7 @@
         <li><b>สร้างรีพอร์ต</b> — เลือกวันที่ แล้วคัดลอกข้อความจากรีพอร์ตล่าสุด (ช่องที่ยังไม่ได้แก้จะมีจุดสีส้ม)</li>
         <li><b>แบ่งงาน</b> — ใส่ชื่อ “ผู้รับผิดชอบ” เหนือแต่ละหน้า ทุกคนเปิดลิงก์เดียวกันแล้วเขียนพร้อมกันได้ เห็นกรอบสีพร้อมชื่อของคนที่กำลังแก้</li>
         <li><b>ข้อความ</b> — คลิกที่กล่องแล้วพิมพ์ได้เลย บันทึกอัตโนมัติ</li>
-        <li><b>รูปกราฟ</b> — คลิกกรอบรูปแล้วกด Ctrl+V (หรือลากไฟล์มาวาง) รูปจะเต็มกรอบอัตโนมัติ ดับเบิลคลิกที่รูปเพื่อลากเลื่อน / หมุนลูกกลิ้งซูม เลือกส่วนของกราฟที่ต้องการ</li>
+        <li><b>รูปกราฟ</b> — คลิกกรอบรูปแล้วกด Ctrl+V (หรือลากไฟล์มาวาง) รูปจะเต็มกรอบอัตโนมัติ ดับเบิลคลิกที่รูปเพื่อลากเลื่อน หมุนลูกกลิ้งซูม หรือลากจุดที่ขอบรูปเพื่อยืดซ้าย-ขวา / บน-ล่าง (ปุ่ม “↔ เต็มความกว้าง” ยืดให้เต็มกรอบทันที)</li>
         <li><b>ตาราง</b> — คัดลอกช่วงข้อมูลจาก Excel แล้ววางที่ช่องแรก ระบบจะเติมทั้งตารางให้</li>
         <li><b>ดาวน์โหลด</b> — ปุ่ม PowerPoint / PDF มุมขวาบน ไฟล์ใช้ธีมเดิมของรีพอร์ตทุกอย่าง</li></ol></section>
     </div>`;
@@ -454,19 +454,19 @@
         if (act === "upload") pickFile(key);
         if (act === "clear") { if (confirm("ลบรูปนี้?")) setImage(key, null); }
         if (act === "fit") {
-          const v0 = fields[key].v, cur = YTCRender.isCrop(v0) ? "crop" : (v0.fit || "contain");
-          const nxt = { crop: "contain", contain: "stretch", stretch: "crop" }[cur];
-          setImage(key, { ...v0, fit: nxt });
+          const v0 = fields[key].v;
+          const cur = (v0.rect || v0.crop) ? "free" : (v0.fit === "cover" ? "crop" : v0.fit || "crop");
+          const nxt = { free: "crop", crop: "contain", contain: "stretch", stretch: "crop" }[cur];
+          const { rect, crop, ...rest } = v0;
+          setImage(key, { ...rest, fit: nxt });
         }
         if (act === "adjust") startAdjust(box);
       };
       box.ondblclick = ev => {
         if (ev.target.closest(".imgbar") || ev.target.closest(".adjbar")) return;
         const v = fields[key] && fields[key].v;
-        if (v && v.url) {
-          if (!YTCRender.isCrop(v)) { setImage(key, { ...v, fit: "crop" }); startAdjust(document.querySelector(`.page .el[data-key="${key}"]`)); }
-          else startAdjust(box);
-        } else pickFile(key);
+        if (v && v.url) startAdjust(box);
+        else pickFile(key);
       };
       box.addEventListener("dragover", ev => { ev.preventDefault(); box.classList.add("drop"); });
       box.addEventListener("dragleave", () => box.classList.remove("drop"));
@@ -545,44 +545,62 @@
       return t;
     }
 
-    /* crop tool: drag = move, wheel / slider = zoom; the frame shape never changes */
+    /* picture tool: drag = move, wheel = zoom, edge handles = stretch left/right or up/down */
     let adjusting = null;
     function startAdjust(box) {
       if (!box) return;
       if (adjusting) finishAdjust(true);
       const key = box.dataset.key, e = elementOf(key), v = fields[key] && fields[key].v;
       if (!v || !v.url) return;
-      const fw = e.box[2], fh = e.box[3];
-      const base = YTCRender.coverCrop(v.w || fw, v.h || fh, fw, fh);       // zoom 100% = just fills the frame
-      let c = { ...YTCRender.cropOf(v, fw, fh) };
+      const fw = e.box[2], fh = e.box[3], iw = v.w || fw, ih = v.h || fh;
+      let R = { ...YTCRender.rectOf(v, fw, fh) };
       const img = box.querySelector(".clip img"); if (!img) return;
       const ghost = img.cloneNode(); ghost.className = "ghost"; box.insertBefore(ghost, box.firstChild);
+      const handles = ["l", "r", "t", "b"].map(side => {
+        const hd = document.createElement("div"); hd.className = "hdl hdl-" + side; hd.dataset.side = side;
+        hd.title = side === "l" || side === "r" ? "ลากเพื่อยืด/หดรูปซ้าย-ขวา" : "ลากเพื่อยืด/หดรูปบน-ล่าง";
+        box.appendChild(hd); return hd;
+      });
       box.classList.add("adjusting"); selectImg(box);
       const bar = document.createElement("div"); bar.className = "adjbar";
-      bar.innerHTML = `<span>ลากเพื่อเลื่อน · ลูกกลิ้งเพื่อซูม</span><input type="range" min="100" max="600" step="1" title="ซูม"><button data-a="reset">รีเซ็ต</button><button data-a="ok" class="ok">เสร็จ</button>`;
+      bar.innerHTML = `<span>ลากรูป=เลื่อน · ลูกกลิ้ง=ซูม · จุดที่ขอบ=ยืด</span>` +
+        `<button data-a="zin" title="ซูมเข้า">＋</button><button data-a="zout" title="ซูมออก">－</button>` +
+        `<button data-a="fillw" title="ยืดให้เต็มความกว้างกรอบ">↔ เต็มความกว้าง</button><button data-a="fillh" title="ยืดให้เต็มความสูงกรอบ">↕ เต็มความสูง</button>` +
+        `<button data-a="cover">เต็มกรอบ</button><button data-a="contain">พอดีกรอบ</button><button data-a="ok" class="ok">เสร็จ</button>`;
       box.appendChild(bar);
-      const range = bar.querySelector("input");
+      const MIN = 0.08, MAX = 8;
       const clamp = () => {
-        c.w = Math.min(base.w, Math.max(base.w / 6, c.w)); c.h = c.w / base.w * base.h;
-        c.x = Math.min(1 - c.w, Math.max(0, c.x)); c.y = Math.min(1 - c.h, Math.max(0, c.y));
+        R.w = Math.min(MAX, Math.max(MIN, R.w)); R.h = Math.min(MAX, Math.max(MIN, R.h));
+        R.l = Math.min(0.95, Math.max(0.05 - R.w, R.l)); R.t = Math.min(0.95, Math.max(0.05 - R.h, R.t));
       };
-      const paint = () => { clamp(); YTCRender.placeCrop(img, c); YTCRender.placeCrop(ghost, c); range.value = Math.round(base.w / c.w * 100); };
-      const zoomAt = (factor, fx = 0.5, fy = 0.5) => {         // keep the point under (fx, fy) of the frame fixed
-        const px = c.x + fx * c.w, py = c.y + fy * c.h;
-        c.w = c.w / factor; c.h = c.w / base.w * base.h; clamp();
-        c.x = px - fx * c.w; c.y = py - fy * c.h; paint();
+      const paint = () => {
+        clamp(); YTCRender.placeRect(img, R); YTCRender.placeRect(ghost, R);
+        const mx = (R.l + R.w / 2) * 100, my = (R.t + R.h / 2) * 100;
+        Object.assign(handles[0].style, { left: R.l * 100 + "%", top: my + "%" });
+        Object.assign(handles[1].style, { left: (R.l + R.w) * 100 + "%", top: my + "%" });
+        Object.assign(handles[2].style, { left: mx + "%", top: R.t * 100 + "%" });
+        Object.assign(handles[3].style, { left: mx + "%", top: (R.t + R.h) * 100 + "%" });
+      };
+      const zoomAt = (f, px = 0.5, py = 0.5) => {          // keep the frame point (px, py) still
+        const nw = Math.min(MAX, Math.max(MIN, R.w * f)), nh = Math.min(MAX, Math.max(MIN, R.h * f));
+        R.l = px - (px - R.l) * nw / R.w; R.t = py - (py - R.t) * nh / R.h; R.w = nw; R.h = nh; paint();
       };
       let drag = null;
       const down = ev => {
         if (ev.target.closest(".adjbar")) return;
-        ev.preventDefault(); box.setPointerCapture(ev.pointerId);
-        drag = { x: ev.clientX, y: ev.clientY, c: { ...c } };
+        ev.preventDefault(); try { box.setPointerCapture(ev.pointerId); } catch (err) {}
+        drag = { x: ev.clientX, y: ev.clientY, R: { ...R }, side: ev.target.dataset && ev.target.dataset.side };
       };
       const move = ev => {
         if (!drag) return;
         const r = box.getBoundingClientRect();
-        c.x = drag.c.x - (ev.clientX - drag.x) / r.width * c.w;
-        c.y = drag.c.y - (ev.clientY - drag.y) / r.height * c.h; paint();
+        const dx = (ev.clientX - drag.x) / r.width, dy = (ev.clientY - drag.y) / r.height, o = drag.R;
+        if (drag.side === "r") R.w = Math.max(MIN, o.w + dx);
+        else if (drag.side === "l") { R.w = Math.max(MIN, o.w - dx); R.l = o.l + o.w - R.w; }
+        else if (drag.side === "b") R.h = Math.max(MIN, o.h + dy);
+        else if (drag.side === "t") { R.h = Math.max(MIN, o.h - dy); R.t = o.t + o.h - R.h; }
+        else { R.l = o.l + dx; R.t = o.t + dy; }
+        paint();
       };
       const up = () => { drag = null; };
       const wheel = ev => {
@@ -591,12 +609,16 @@
         zoomAt(Math.exp(-ev.deltaY * 0.0015), (ev.clientX - r.left) / r.width, (ev.clientY - r.top) / r.height);
       };
       const keys = ev => { if (ev.key === "Enter") { ev.preventDefault(); finishAdjust(true); } if (ev.key === "Escape") finishAdjust(false); };
-      range.oninput = () => zoomAt((range.value / 100) / (base.w / c.w));
       bar.addEventListener("pointerdown", ev => ev.stopPropagation());
+      bar.addEventListener("dblclick", ev => ev.stopPropagation());
       bar.onclick = ev => {
         ev.stopPropagation();
         const a = ev.target.dataset.a;
-        if (a === "reset") { c = { ...base }; paint(); }
+        if (a === "zin") zoomAt(1.15); if (a === "zout") zoomAt(1 / 1.15);
+        if (a === "fillw") { R.l = 0; R.w = 1; paint(); }
+        if (a === "fillh") { R.t = 0; R.h = 1; paint(); }
+        if (a === "cover") { R = YTCRender.coverRect(iw, ih, fw, fh); paint(); }
+        if (a === "contain") { R = YTCRender.containRect(iw, ih, fw, fh); paint(); }
         if (a === "ok") finishAdjust(true);
       };
       box.addEventListener("pointerdown", down); box.addEventListener("pointermove", move);
@@ -606,13 +628,16 @@
       setTimeout(() => document.addEventListener("mousedown", outside), 0);
       paint();
       adjusting = {
-        key, box, crop: () => c,
+        key, box,
         done: save => {
           box.removeEventListener("pointerdown", down); box.removeEventListener("pointermove", move);
           box.removeEventListener("pointerup", up); box.removeEventListener("wheel", wheel);
           document.removeEventListener("keydown", keys); document.removeEventListener("mousedown", outside);
-          if (save) setImage(key, { ...fields[key].v, fit: "crop", crop: { x: +c.x.toFixed(5), y: +c.y.toFixed(5), w: +c.w.toFixed(5), h: +c.h.toFixed(5) } });
-          else rerenderEl(key);
+          if (save) {
+            const { crop, ...rest } = fields[key].v;
+            const q = n => +n.toFixed(5);
+            setImage(key, { ...rest, fit: "free", rect: { l: q(R.l), t: q(R.t), w: q(R.w), h: q(R.h) } });
+          } else rerenderEl(key);
         },
       };
     }

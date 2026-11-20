@@ -195,21 +195,21 @@
           for (const ch of [...blipFill.childNodes]) if (ch !== blip) ch.remove();
           const [x, y, w, h] = e.box;
           const iw = val.w || w, ih = val.h || h;
-          if (YTCRender.isCrop(val)) {                // same visible area as the editor (PowerPoint crop)
-            const c = YTCRender.cropOf(val, w, h), sr = doc.createElementNS(A, "a:srcRect");
-            const pct = v => String(Math.round(v * 100000));
-            sr.setAttribute("l", pct(c.x)); sr.setAttribute("t", pct(c.y));
-            sr.setAttribute("r", pct(1 - c.x - c.w)); sr.setAttribute("b", pct(1 - c.y - c.h));
-            blipFill.appendChild(sr);
-          } else if (val.fit === "stretch") {
-            /* keep the template frame as is */
-          } else {
-            const s = Math.min(w / iw, h / ih), nw = iw * s, nh = ih * s;
+          {                                           // same placement as the editor
+            const R = YTCRender.rectOf(val, w, h);
+            // part of the frame the picture covers, and the part of the picture that shows
+            const il = Math.max(0, R.l), it = Math.max(0, R.t), ir = Math.min(1, R.l + R.w), ib = Math.min(1, R.t + R.h);
             const xf = kid(kid(node, P, "spPr"), A, "xfrm");
-            kid(xf, A, "off").setAttribute("x", Math.round((x + (w - nw) / 2) * EMU));
-            kid(xf, A, "off").setAttribute("y", Math.round((y + (h - nh) / 2) * EMU));
-            kid(xf, A, "ext").setAttribute("cx", Math.round(nw * EMU));
-            kid(xf, A, "ext").setAttribute("cy", Math.round(nh * EMU));
+            kid(xf, A, "off").setAttribute("x", Math.round((x + il * w) * EMU));
+            kid(xf, A, "off").setAttribute("y", Math.round((y + it * h) * EMU));
+            kid(xf, A, "ext").setAttribute("cx", Math.max(1, Math.round((ir - il) * w * EMU)));
+            kid(xf, A, "ext").setAttribute("cy", Math.max(1, Math.round((ib - it) * h * EMU)));
+            const pct = v => String(Math.round(v * 100000));
+            const sr = doc.createElementNS(A, "a:srcRect");
+            const L = (il - R.l) / R.w, T = (it - R.t) / R.h, Rr = (R.l + R.w - ir) / R.w, B = (R.t + R.h - ib) / R.h;
+            if (L > 1e-5) sr.setAttribute("l", pct(L)); if (T > 1e-5) sr.setAttribute("t", pct(T));
+            if (Rr > 1e-5) sr.setAttribute("r", pct(Rr)); if (B > 1e-5) sr.setAttribute("b", pct(B));
+            if (sr.attributes.length) blipFill.appendChild(sr);
           }
           const st = doc.createElementNS(A, "a:stretch"); st.appendChild(doc.createElementNS(A, "a:fillRect"));
           blipFill.appendChild(st);
